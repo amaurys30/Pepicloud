@@ -76,6 +76,40 @@ services:
     volumes:
       - ./localstack/init-kms.sh:/etc/localstack/init/ready.d/10-init-kms.sh:ro
 
+  # ------------------------------------------------------------- PostgreSQL
+  postgres:
+    image: postgres:17
+    container_name: pepicloud-postgres
+    hostname: postgres
+    restart: unless-stopped
+    networks: [pepicloud]
+    environment:
+      POSTGRES_DB: pepicloud
+      POSTGRES_USER: pepicloud_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password   # ruta, no la contrasena
+      TZ: America/Bogota
+    # Necesario para los backups incrementales nativos de PostgreSQL 17 (fase 5)
+    command: ["postgres", "-c", "wal_level=replica", "-c", "summarize_wal=on",
+              "-c", "max_wal_senders=5", "-c", "timezone=America/Bogota"]
+    secrets:
+      - pg_admin_password
+      - pg_replicador_password
+      - pg_registro_password
+      - pg_consulta_password
+      - pg_worker_password
+    ports: ["127.0.0.1:5432:5432"]
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pepicloud_admin -d pepicloud"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  pg_data:
+
 networks:
   pepicloud:
     name: pepicloud
