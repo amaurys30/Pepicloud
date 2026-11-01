@@ -1,0 +1,94 @@
+# PepiCloud - Taller 2 Sistemas Distribuidos (CECAR)
+name: pepicloud
+
+# Configuracion comun de las instancias LocalStack (ancla YAML)
+x-localstack: &localstack
+  image: localstack/localstack:latest
+  restart: unless-stopped
+  networks: [pepicloud]
+  healthcheck:
+    # Sana cuando termino de ejecutar sus scripts de inicio (ready.d)
+    test: ["CMD", "python3", "-c", "import json,sys,urllib.request as u; d=json.load(u.urlopen('http://localhost:4566/_localstack/init/ready')); sys.exit(0 if d.get('completed') else 1)"]
+    interval: 10s
+    timeout: 5s
+    retries: 30
+    start_period: 20s
+
+x-localstack-env: &localstack-env
+  LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:?Falta LOCALSTACK_AUTH_TOKEN en .env}
+  AWS_DEFAULT_REGION: us-east-1
+
+services:
+
+  # ------------------------------------------------------------- copia A
+  localstack-a:
+    <<: *localstack
+    container_name: pepicloud-localstack-a
+    hostname: localstack-a
+    environment:
+      <<: *localstack-env
+      SERVICES: s3
+      BUCKET_NAME: pepicloud-docs-a
+    ports: ["127.0.0.1:4566:4566"]
+    volumes:
+      - ./localstack/init-bucket.sh:/etc/localstack/init/ready.d/10-init-bucket.sh:ro
+
+  # ------------------------------------------------------------- copia B
+  localstack-b:
+    <<: *localstack
+    container_name: pepicloud-localstack-b
+    hostname: localstack-b
+    environment:
+      <<: *localstack-env
+      SERVICES: s3
+      BUCKET_NAME: pepicloud-docs-b
+    ports: ["127.0.0.1:4567:4566"]
+    volumes:
+      - ./localstack/init-bucket.sh:/etc/localstack/init/ready.d/10-init-bucket.sh:ro
+
+  # --------------------------------------- backup documental + backups de BD
+  localstack-backup:
+    <<: *localstack
+    container_name: pepicloud-localstack-backup
+    hostname: localstack-backup
+    environment:
+      <<: *localstack-env
+      SERVICES: s3
+      BUCKET_NAME: pepicloud-docs-backup
+      BUCKET_EXTRA: pepicloud-pg-backups
+    ports: ["127.0.0.1:4568:4566"]
+    volumes:
+      - ./localstack/init-bucket.sh:/etc/localstack/init/ready.d/10-init-bucket.sh:ro
+
+  # -------------------------------------- seguridad: KMS + Secrets Manager
+  localstack-kms:
+    <<: *localstack
+    container_name: pepicloud-localstack-kms
+    hostname: localstack-kms
+    environment:
+      <<: *localstack-env
+      SERVICES: kms,secretsmanager
+    ports: ["127.0.0.1:4569:4566"]
+    secrets:
+      - pg_registro_password
+      - pg_consulta_password
+      - pg_worker_password
+    volumes:
+      - ./localstack/init-kms.sh:/etc/localstack/init/ready.d/10-init-kms.sh:ro
+
+networks:
+  pepicloud:
+    name: pepicloud
+
+# Docker secrets: cada contenedor los ve como archivos en /run/secrets/<nombre>
+secrets:
+  pg_admin_password:
+    file: ./secrets/pg_admin_password.txt
+  pg_replicador_password:
+    file: ./secrets/pg_replicador_password.txt
+  pg_registro_password:
+    file: ./secrets/pg_registro_password.txt
+  pg_consulta_password:
+    file: ./secrets/pg_consulta_password.txt
+  pg_worker_password:
+    file: ./secrets/pg_worker_password.txt
