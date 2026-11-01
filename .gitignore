@@ -1,0 +1,10 @@
+# Secretos: NUNCA se suben al repositorio
+.env
+secrets/*
+!secrets/.gitkeep
+
+# Archivos locales
+evidencias/
+__pycache__/
+*.pyc
+.venv/
