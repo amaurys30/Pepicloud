@@ -23,6 +23,8 @@ x-app: &app
   build: ./app
   image: pepicloud-app:latest
   networks: [pepicloud]
+  # Resolver DNS con timeout corto: un contenedor apagado se detecta en ~1 s
+  dns_opt: ["timeout:1", "attempts:1"]
   secrets: [aws_credentials]
   environment: &app-env
     AWS_DEFAULT_REGION: us-east-1
