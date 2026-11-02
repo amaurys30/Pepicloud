@@ -224,9 +224,43 @@ services:
     depends_on:
       api-consulta: {condition: service_healthy}
 
+  # ------------------------------------- backups de PostgreSQL (full + incrementales)
+  pg-backup:
+    build: ./pg-backup
+    image: pepicloud-pg-backup:latest
+    container_name: pepicloud-pg-backup
+    hostname: pg-backup
+    restart: unless-stopped
+    networks: [pepicloud]
+    environment:
+      TZ: America/Bogota
+      BACKUP_INTERVALO_MIN: "10"
+    secrets: [pg_replicador_password]
+    volumes:
+      - pg_backups:/backups      # volumen distinto al de la base en operacion
+      - pg_restore:/restore
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  # ------------------------- instancia para probar la restauracion (solo bajo demanda)
+  postgres-restore:
+    image: postgres:17
+    container_name: pepicloud-postgres-restore
+    hostname: postgres-restore
+    profiles: ["restore"]
+    networks: [pepicloud]
+    environment:
+      PGDATA: /var/lib/postgresql/restore/data
+      TZ: America/Bogota
+    ports: ["127.0.0.1:5433:5432"]
+    volumes:
+      - pg_restore:/var/lib/postgresql/restore
+
 volumes:
   pg_data:
   boveda:
+  pg_backups:
+  pg_restore:
 
 networks:
   pepicloud:
