@@ -25,3 +25,11 @@ done
 
 chmod 700 secrets
 chmod 644 secrets/*.txt
+
+# Credenciales para que las APIs hablen con LocalStack (acepta cualquier valor,
+# pero se manejan como secreto igual que en produccion)
+if [[ ! -f secrets/aws_credentials ]]; then
+  printf '[default]\naws_access_key_id = test\naws_secret_access_key = test\n' > secrets/aws_credentials
+  echo "Creado:    secrets/aws_credentials"
+fi
+chmod 644 secrets/aws_credentials

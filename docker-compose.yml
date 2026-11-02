@@ -18,6 +18,27 @@ x-localstack-env: &localstack-env
   LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:?Falta LOCALSTACK_AUTH_TOKEN en .env}
   AWS_DEFAULT_REGION: us-east-1
 
+# Configuracion comun de los servicios Python (APIs y worker)
+x-app: &app
+  build: ./app
+  image: pepicloud-app:latest
+  networks: [pepicloud]
+  secrets: [aws_credentials]
+  environment: &app-env
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_SHARED_CREDENTIALS_FILE: /run/secrets/aws_credentials
+    S3_A_ENDPOINT: http://localstack-a:4566
+    S3_A_BUCKET: pepicloud-docs-a
+    S3_B_ENDPOINT: http://localstack-b:4566
+    S3_B_BUCKET: pepicloud-docs-b
+    S3_BACKUP_ENDPOINT: http://localstack-backup:4566
+    S3_BACKUP_BUCKET: pepicloud-docs-backup
+    KMS_ENDPOINT: http://localstack-kms:4566
+    KMS_KEY_ALIAS: alias/pepicloud-docs
+    RETENCION_MINUTOS: ${RETENCION_MINUTOS:-30}
+    DB_HOST: postgres
+    DB_NAME: pepicloud
+
 services:
 
   # ------------------------------------------------------------- copia A
@@ -107,6 +128,12 @@ services:
       timeout: 5s
       retries: 20
 
+  # --------------------------------- contenedor de pruebas (solo bajo demanda)
+  app-pruebas:
+    <<: *app
+    container_name: pepicloud-app-pruebas
+    profiles: ["pruebas"]     # no arranca con "up"; se ejecuta con "run"
+
 volumes:
   pg_data:
 
@@ -126,3 +153,5 @@ secrets:
     file: ./secrets/pg_consulta_password.txt
   pg_worker_password:
     file: ./secrets/pg_worker_password.txt
+  aws_credentials:
+    file: ./secrets/aws_credentials
