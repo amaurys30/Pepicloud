@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PepiCloud · Consulta</title>
+<style>
+:root{--verde:#1b6b52;--fondo:#f4f6f8;--borde:#d5dbe1;--ok:#1e7b34;--mal:#b3261e;--aviso:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,"Segoe UI",Roboto,sans-serif;background:var(--fondo);color:#1d2329}
+header{background:var(--verde);color:#fff;padding:14px 24px}
+header h1{margin:0;font-size:20px} header p{margin:2px 0 0;opacity:.85;font-size:13px}
+#estado{padding:8px 24px;font-size:13px}
+#estado.ok{background:#e6f4ea;color:var(--ok)} #estado.mal{background:#fff4ce;color:var(--aviso)}
+main{max-width:1100px;margin:0 auto;padding:20px;display:grid;gap:20px}
+section{background:#fff;border:1px solid var(--borde);border-radius:8px;padding:18px}
+h2{margin:0 0 12px;font-size:16px}
+form{display:grid;gap:10px;grid-template-columns:2fr 2fr 1fr 1fr auto;align-items:end}
+label{display:block;font-size:13px;margin-bottom:4px;color:#4a5560}
+input,select,button{font:inherit;padding:8px 10px;border:1px solid var(--borde);border-radius:6px;width:100%}
+button{background:var(--verde);color:#fff;border:0;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+button.chico{width:auto;padding:4px 12px;font-size:12px}
+.msg{margin-top:12px;font-size:13px;padding:10px;border-radius:6px;white-space:pre-wrap}
+.msg.ok{background:#e6f4ea;color:var(--ok)} .msg.mal{background:#fce8e6;color:var(--mal)}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--borde);vertical-align:top}
+small{color:#5f6b76}
+.chip{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;margin:1px;background:#eef1f4}
+.chip.OK{background:#e6f4ea;color:var(--ok)} .chip.PENDIENTE{background:#fff4ce;color:var(--aviso)}
+.chip.FALLIDA,.chip.PERDIDA{background:#fce8e6;color:var(--mal)}
+.servido{font-weight:600;padding:2px 8px;border-radius:6px;color:#fff}
+.servido.A{background:var(--ok)} .servido.B{background:var(--aviso)} .servido.BACKUP{background:var(--mal)}
+@media(max-width:800px){form{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><h1>PepiCloud · Portal de consulta</h1><p>Búsqueda y descarga de documentos clínicos (solo lectura)</p></header>
+<div id="estado">Verificando estado del sistema...</div>
+<main>
+<section>
+  <h2>Buscar documentos de un paciente</h2>
+  <form id="fBuscar">
+    <div><label>Cédula</label><input name="cedula" required pattern="[0-9]{5,10}" inputmode="numeric"></div>
+    <div><label>Tipo de documento</label><select name="tipo" id="tipos"><option value="">Todos</option></select></div>
+    <div><label>Desde</label><input name="desde" type="date"></div>
+    <div><label>Hasta</label><input name="hasta" type="date"></div>
+    <div><button>Buscar</button></div>
+  </form>
+  <div id="mBuscar"></div>
+</section>
+<section id="resultados" hidden>
+  <h2 id="paciente"></h2>
+  <table>
+    <thead><tr><th>Fecha de registro</th><th>Tipo / título</th><th>Archivo</th><th>Copias</th><th></th></tr></thead>
+    <tbody id="tabla"></tbody>
+  </table>
+  <div id="mDescarga"></div>
+</section>
+</main>
+<script>
+const API = "/api";
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const hora = iso => new Date(iso).toLocaleString("es-CO", {dateStyle: "short", timeStyle: "medium"});
+const tamano = b => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`;
+
+function textoError(det) {
+  if (typeof det === "string") return det;
+  if (Array.isArray(det)) return det.map(e => `${(e.loc || []).slice(-1)}: ${e.msg}`).join("\n");
+  return JSON.stringify(det, null, 2);
+}
+function mostrar(id, ok, html) {
+  document.getElementById(id).innerHTML = `<div class="msg ${ok ? "ok" : "mal"}">${html}</div>`;
+}
+async function llamar(ruta) {
+  const r = await fetch(API + ruta);
+  let cuerpo = null;
+  try { cuerpo = await r.json(); } catch {}
+  if (!r.ok) throw new Error(`HTTP ${r.status}\n` + textoError(cuerpo?.detail ?? cuerpo ?? r.statusText));
+  return cuerpo;
+}
+
+async function estado() {
+  const caja = document.getElementById("estado");
+  try {
+    const s = await llamar("/salud");
+    const caidas = s.copias_marcadas_caidas;
+    caja.className = caidas.length ? "mal" : "ok";
+    caja.textContent = caidas.length
+      ? `Atención: copia(s) ${caidas.join(", ")} no disponibles. Las descargas usan las copias restantes.`
+      : "Sistema operativo: todas las copias disponibles.";
+  } catch (err) {
+    caja.className = "mal";
+    caja.textContent = "No se pudo contactar el servicio de consulta.";
+  }
+}
+
+async function cargarTipos() {
+  const tipos = await llamar("/tipos");
+  document.getElementById("tipos").innerHTML += tipos.map(t =>
+    `<option value="${esc(t.codigo)}">${esc(t.descripcion)}</option>`).join("");
+}
+
+document.getElementById("fBuscar").onsubmit = async e => {
+  e.preventDefault();
+  const datos = Object.fromEntries(new FormData(e.target));
+  const filtros = new URLSearchParams();
+  for (const k of ["tipo", "desde", "hasta"]) if (datos[k]) filtros.set(k, datos[k]);
+  document.getElementById("mBuscar").innerHTML = "";
+  document.getElementById("mDescarga").innerHTML = "";
+  try {
+    const r = await llamar(`/personas/${encodeURIComponent(datos.cedula)}/documentos?${filtros}`);
+    document.getElementById("resultados").hidden = false;
+    document.getElementById("paciente").textContent =
+      `${r.persona.nombres} ${r.persona.apellidos} · CC ${r.persona.cedula} · ${r.documentos.length} documento(s)`;
+    document.getElementById("tabla").innerHTML = r.documentos.length ? r.documentos.map(d => {
+      const copias = ["A", "B", "BACKUP"].map(rol =>
+        `<span class="chip ${esc(d.copias?.[rol])}">${rol}: ${esc(d.copias?.[rol])}</span>`).join(" ");
+      return `<tr><td>${hora(d.fecha_registro)}</td>
+        <td>${esc(d.tipo_descripcion)}<br><small>${esc(d.titulo)}</small></td>
+        <td>${esc(d.nombre_original)}<br><small>${tamano(d.tamano_bytes)}</small></td>
+        <td>${copias}</td>
+        <td><button class="chico" onclick="descargar('${esc(d.id_documento)}', this)">Descargar</button></td></tr>`;
+    }).join("") : `<tr><td colspan="5"><small>No hay documentos con esos filtros.</small></td></tr>`;
+  } catch (err) {
+    document.getElementById("resultados").hidden = true;
+    mostrar("mBuscar", false, esc(err.message));
+  }
+};
+
+async function descargar(id, boton) {
+  boton.disabled = true; boton.textContent = "Descargando...";
+  try {
+    const r = await fetch(`${API}/documentos/${id}/descargar`);
+    if (!r.ok) {
+      let cuerpo = null; try { cuerpo = await r.json(); } catch {}
+      throw new Error(`HTTP ${r.status}\n` + textoError(cuerpo?.detail ?? r.statusText));
+    }
+    const servido = r.headers.get("X-Servido-Desde");
+    const segundos = r.headers.get("X-Tiempo-Segundos");
+    const orden = r.headers.get("X-Orden-Intentos");
+    const nombre = decodeURIComponent((r.headers.get("Content-Disposition") || "").split("''")[1] || "documento");
+    const url = URL.createObjectURL(await r.blob());
+    const a = Object.assign(document.createElement("a"), {href: url, download: nombre});
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    mostrar("mDescarga", true,
+      `Documento descargado, descifrado y verificado (SHA-256): ${esc(nombre)}<br>` +
+      `Servido desde: <span class="servido ${esc(servido)}">Copia ${esc(servido)}</span> ` +
+      `en ${esc(segundos)} s · orden de intentos: ${esc(orden)}`);
+  } catch (err) { mostrar("mDescarga", false, esc(err.message)); }
+  finally { boton.disabled = false; boton.textContent = "Descargar"; estado(); }
+}
+
+cargarTipos().catch(() => {});
+estado();
+setInterval(estado, 5000);
+</script>
+</body>
+</html>
