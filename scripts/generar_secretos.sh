@@ -41,3 +41,10 @@ if [[ ! -f secrets/kms_key_material.txt ]]; then
   echo "Creado:    secrets/kms_key_material.txt"
 fi
 chmod 644 secrets/kms_key_material.txt
+
+# Token de administrador para eliminar documentos (api-registro)
+if [[ ! -f secrets/api_admin_token.txt ]]; then
+  head -c 1024 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 32 > secrets/api_admin_token.txt || true
+  echo "Creado:    secrets/api_admin_token.txt"
+fi
+chmod 644 secrets/api_admin_token.txt

@@ -140,6 +140,27 @@ services:
       - ./app/comun:/app/comun:ro
       - ./app/pruebas:/app/pruebas:ro
 
+  # ------------------------------------------------- API de registro (carga)
+  api-registro:
+    <<: *app
+    container_name: pepicloud-api-registro
+    hostname: api-registro
+    restart: unless-stopped
+    command: ["uvicorn", "api_registro.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["127.0.0.1:8001:8000"]
+    secrets: [aws_credentials, api_admin_token]
+    depends_on:
+      postgres:          {condition: service_healthy}
+      localstack-kms:    {condition: service_healthy}
+      localstack-a:      {condition: service_healthy}
+      localstack-b:      {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/salud', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
 volumes:
   pg_data:
 
@@ -163,3 +184,5 @@ secrets:
     file: ./secrets/aws_credentials
   kms_key_material:
     file: ./secrets/kms_key_material.txt
+  api_admin_token:
+    file: ./secrets/api_admin_token.txt
