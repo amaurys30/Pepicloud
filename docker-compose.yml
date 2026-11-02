@@ -147,7 +147,7 @@ services:
     hostname: api-registro
     restart: unless-stopped
     command: ["uvicorn", "api_registro.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    ports: ["127.0.0.1:8001:8000"]
+    # sin puertos publicados: solo se accede a traves de su portal
     secrets: [aws_credentials, api_admin_token]
     depends_on:
       postgres:          {condition: service_healthy}
@@ -168,7 +168,7 @@ services:
     hostname: api-consulta
     restart: unless-stopped
     command: ["uvicorn", "api_consulta.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    ports: ["127.0.0.1:8002:8000"]
+    # sin puertos publicados: solo se accede a traves de su portal
     depends_on:            # NO depende de A, B ni backup: debe funcionar con copias caidas
       postgres:       {condition: service_healthy}
       localstack-kms: {condition: service_healthy}
