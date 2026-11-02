@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY comun/ comun/
 COPY api_registro/ api_registro/
+COPY api_consulta/ api_consulta/
 
 USER app
 CMD ["python", "-m", "comun.diagnostico"]

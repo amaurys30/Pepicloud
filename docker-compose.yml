@@ -161,6 +161,24 @@ services:
       retries: 10
       start_period: 10s
 
+  # ------------------------------------------------- API de consulta (lectura)
+  api-consulta:
+    <<: *app
+    container_name: pepicloud-api-consulta
+    hostname: api-consulta
+    restart: unless-stopped
+    command: ["uvicorn", "api_consulta.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["127.0.0.1:8002:8000"]
+    depends_on:            # NO depende de A, B ni backup: debe funcionar con copias caidas
+      postgres:       {condition: service_healthy}
+      localstack-kms: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/salud', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
 volumes:
   pg_data:
 
