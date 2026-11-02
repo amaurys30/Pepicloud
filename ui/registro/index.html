@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PepiCloud · Registro</title>
+<style>
+:root{--azul:#1f5f8b;--fondo:#f4f6f8;--borde:#d5dbe1;--ok:#1e7b34;--mal:#b3261e;--aviso:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,"Segoe UI",Roboto,sans-serif;background:var(--fondo);color:#1d2329}
+header{background:var(--azul);color:#fff;padding:14px 24px}
+header h1{margin:0;font-size:20px} header p{margin:2px 0 0;opacity:.85;font-size:13px}
+main{max-width:1100px;margin:0 auto;padding:20px;display:grid;gap:20px;grid-template-columns:1fr 1fr}
+section{background:#fff;border:1px solid var(--borde);border-radius:8px;padding:18px}
+section.ancho{grid-column:1/-1}
+h2{margin:0 0 12px;font-size:16px}
+label{display:block;font-size:13px;margin:10px 0 4px;color:#4a5560}
+input,select,button{font:inherit;padding:8px 10px;border:1px solid var(--borde);border-radius:6px;width:100%}
+button{background:var(--azul);color:#fff;border:0;cursor:pointer;margin-top:14px}
+button:disabled{opacity:.6;cursor:wait}
+button.peligro{background:var(--mal);width:auto;margin:0;padding:4px 10px;font-size:12px}
+.msg{margin-top:12px;font-size:13px;padding:10px;border-radius:6px;white-space:pre-wrap;word-break:break-all}
+.msg.ok{background:#e6f4ea;color:var(--ok)} .msg.mal{background:#fce8e6;color:var(--mal)}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--borde);vertical-align:top}
+small{color:#5f6b76}
+.chip{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;margin:1px;background:#eef1f4}
+.chip.OK{background:#e6f4ea;color:var(--ok)} .chip.PENDIENTE{background:#fff4ce;color:var(--aviso)}
+.chip.FALLIDA,.chip.PERDIDA{background:#fce8e6;color:var(--mal)}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><h1>PepiCloud · Portal de registro</h1><p>Registro de pacientes y carga de documentos clínicos</p></header>
+<main>
+<section>
+  <h2>1. Registrar persona</h2>
+  <form id="fPersona">
+    <label>Cédula</label><input name="cedula" required pattern="[0-9]{5,10}" inputmode="numeric">
+    <label>Nombres</label><input name="nombres" required maxlength="100">
+    <label>Apellidos</label><input name="apellidos" required maxlength="100">
+    <label>Fecha de nacimiento</label><input name="fecha_nacimiento" type="date">
+    <button>Registrar persona</button>
+  </form>
+  <div id="mPersona"></div>
+</section>
+<section>
+  <h2>2. Cargar documento</h2>
+  <form id="fDoc">
+    <label>Cédula del paciente</label><input name="cedula" required pattern="[0-9]{5,10}" inputmode="numeric">
+    <label>Tipo de documento</label><select name="codigo_tipo" id="tipos" required></select>
+    <label>Título</label><input name="titulo" required maxlength="200">
+    <label>Archivo (PDF, JPG o PNG, máx. 20 MB)</label>
+    <input name="archivo" type="file" accept=".pdf,.jpg,.jpeg,.png" required>
+    <button>Cargar documento</button>
+  </form>
+  <div id="mDoc"></div>
+</section>
+<section class="ancho">
+  <h2>3. Últimos documentos cargados</h2>
+  <label>Token de administrador (solo para eliminar)</label>
+  <input id="token" type="password" autocomplete="off" style="max-width:420px">
+  <table>
+    <thead><tr><th>Fecha</th><th>Paciente</th><th>Tipo / título</th><th>Copias</th><th>Inmutable hasta</th><th></th></tr></thead>
+    <tbody id="tabla"></tbody>
+  </table>
+  <div id="mTabla"></div>
+</section>
+</main>
+<script>
+const API = "/api";
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const hora = iso => new Date(iso).toLocaleString("es-CO", {dateStyle: "short", timeStyle: "medium"});
+
+function textoError(det) {
+  if (typeof det === "string") return det;
+  if (Array.isArray(det)) return det.map(e => `${(e.loc || []).slice(-1)}: ${e.msg}`).join("\n");
+  return JSON.stringify(det, null, 2);
+}
+function mostrar(id, ok, texto) {
+  document.getElementById(id).innerHTML = `<div class="msg ${ok ? "ok" : "mal"}">${esc(texto)}</div>`;
+}
+async function llamar(ruta, opciones = {}) {
+  const r = await fetch(API + ruta, opciones);
+  let cuerpo = null;
+  try { cuerpo = await r.json(); } catch {}
+  if (!r.ok) throw new Error(`HTTP ${r.status}\n` + textoError(cuerpo?.detail ?? cuerpo ?? r.statusText));
+  return cuerpo;
+}
+
+async function cargarTipos() {
+  const tipos = await llamar("/tipos");
+  document.getElementById("tipos").innerHTML =
+    tipos.map(t => `<option value="${esc(t.codigo)}">${esc(t.descripcion)}</option>`).join("");
+}
+
+document.getElementById("fPersona").onsubmit = async e => {
+  e.preventDefault();
+  const f = e.target, b = f.querySelector("button");
+  b.disabled = true;
+  const datos = Object.fromEntries(new FormData(f));
+  if (!datos.fecha_nacimiento) delete datos.fecha_nacimiento;
+  try {
+    const r = await llamar("/personas", {method: "POST", headers: {"Content-Type": "application/json"},
+                                         body: JSON.stringify(datos)});
+    mostrar("mPersona", true, `${r.mensaje}: ${r.cedula}`);
+    document.querySelector("#fDoc [name=cedula]").value = r.cedula;
+    f.reset();
+  } catch (err) { mostrar("mPersona", false, err.message); }
+  finally { b.disabled = false; }
+};
+
+document.getElementById("fDoc").onsubmit = async e => {
+  e.preventDefault();
+  const f = e.target, b = f.querySelector("button");
+  b.disabled = true; b.textContent = "Cifrando y cargando...";
+  try {
+    const r = await llamar("/documentos", {method: "POST", body: new FormData(f)});
+    const copias = Object.entries(r.copias).map(([rol, c]) =>
+      `  Copia ${rol}: ${c.ok ? "OK (versión " + c.version_id + ")" : "FALLIDA (" + c.error + ")"}`).join("\n");
+    mostrar("mDoc", true,
+      `Documento cifrado y cargado\nId: ${r.id_documento}\nRuta: ${r.llave_objeto}\n` +
+      `Inmutable hasta: ${hora(r.retencion_hasta)}\n${copias}\n  Copia BACKUP: la realiza el worker en segundo plano`);
+    f.querySelector("[name=titulo]").value = "";
+    f.querySelector("[name=archivo]").value = "";
+    refrescar();
+  } catch (err) { mostrar("mDoc", false, err.message); }
+  finally { b.disabled = false; b.textContent = "Cargar documento"; }
+};
+
+async function eliminar(id) {
+  const token = document.getElementById("token").value.trim();
+  if (!token) { mostrar("mTabla", false, "Escriba el token de administrador para eliminar."); return; }
+  try {
+    const r = await llamar(`/documentos/${id}`, {method: "DELETE", headers: {Authorization: `Bearer ${token}`}});
+    mostrar("mTabla", true, `Documento ${id} eliminado\n${JSON.stringify(r.copias)}`);
+  } catch (err) { mostrar("mTabla", false, err.message); }
+  refrescar();
+}
+
+async function refrescar() {
+  try {
+    const docs = await llamar("/documentos/recientes?limite=20");
+    const ahora = Date.now();
+    document.getElementById("tabla").innerHTML = docs.map(d => {
+      const vigente = new Date(d.retencion_hasta).getTime() > ahora;
+      const copias = ["A", "B", "BACKUP"].map(r =>
+        `<span class="chip ${esc(d.copias?.[r])}">${r}: ${esc(d.copias?.[r])}</span>`).join(" ");
+      const accion = d.estado === "ACTIVO"
+        ? `<button class="peligro" onclick="eliminar('${esc(d.id_documento)}')">Eliminar</button>`
+        : "<small>ELIMINADO</small>";
+      return `<tr><td>${hora(d.fecha_registro)}</td>
+        <td>${esc(d.persona)}<br><small>${esc(d.cedula)}</small></td>
+        <td>${esc(d.tipo)}<br><small>${esc(d.titulo)}</small></td>
+        <td>${copias}</td>
+        <td>${hora(d.retencion_hasta)}<br><small>${vigente ? "protegido" : "retención vencida"}</small></td>
+        <td>${accion}</td></tr>`;
+    }).join("");
+  } catch (err) { mostrar("mTabla", false, err.message); }
+}
+
+cargarTipos().catch(err => mostrar("mDoc", false, err.message));
+refrescar();
+setInterval(refrescar, 5000);
+</script>
+</body>
+</html>

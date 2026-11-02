@@ -196,6 +196,20 @@ services:
       postgres:       {condition: service_healthy}
       localstack-kms: {condition: service_healthy}
 
+  # ------------------------------------------------- Portal web de registro
+  ui-registro:
+    image: nginx:1.27-alpine
+    container_name: pepicloud-ui-registro
+    hostname: ui-registro
+    restart: unless-stopped
+    networks: [pepicloud]
+    ports: ["127.0.0.1:8081:80"]
+    volumes:
+      - ./ui/registro:/usr/share/nginx/html:ro
+      - ./ui/nginx-registro.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api-registro: {condition: service_healthy}
+
 volumes:
   pg_data:
   boveda:
