@@ -15,6 +15,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY comun/ comun/
 COPY api_registro/ api_registro/
 COPY api_consulta/ api_consulta/
+COPY worker_backup/ worker_backup/
+
+# Boveda del backup (volumen): el usuario app debe poder escribir en ella
+RUN mkdir -p /boveda && chown app:app /boveda
 
 USER app
 CMD ["python", "-m", "comun.diagnostico"]

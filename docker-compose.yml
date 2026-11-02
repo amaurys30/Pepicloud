@@ -179,8 +179,26 @@ services:
       retries: 10
       start_period: 10s
 
+  # --------------------------------------- worker de backup, reparacion y limpieza
+  worker-backup:
+    <<: *app
+    container_name: pepicloud-worker-backup
+    hostname: worker-backup
+    restart: unless-stopped
+    command: ["python", "-m", "worker_backup.main"]
+    environment:
+      <<: *app-env
+      WORKER_INTERVALO: "15"
+      BOVEDA_DIR: /boveda
+    volumes:
+      - boveda:/boveda          # backup en disco: sobrevive a reinicios de LocalStack
+    depends_on:
+      postgres:       {condition: service_healthy}
+      localstack-kms: {condition: service_healthy}
+
 volumes:
   pg_data:
+  boveda:
 
 networks:
   pepicloud:
