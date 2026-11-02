@@ -33,3 +33,11 @@ if [[ ! -f secrets/aws_credentials ]]; then
   echo "Creado:    secrets/aws_credentials"
 fi
 chmod 644 secrets/aws_credentials
+
+# Material de la clave maestra KMS (32 bytes = AES-256). Permite recrear la MISMA
+# clave si el contenedor localstack-kms se reinicia; sin el, los documentos son irrecuperables.
+if [[ ! -f secrets/kms_key_material.txt ]]; then
+  head -c 32 /dev/urandom | base64 -w0 > secrets/kms_key_material.txt
+  echo "Creado:    secrets/kms_key_material.txt"
+fi
+chmod 644 secrets/kms_key_material.txt

@@ -8,7 +8,7 @@ x-localstack: &localstack
   networks: [pepicloud]
   healthcheck:
     # Sana cuando termino de ejecutar sus scripts de inicio (ready.d)
-    test: ["CMD", "python3", "-c", "import json,sys,urllib.request as u; d=json.load(u.urlopen('http://localhost:4566/_localstack/init/ready')); sys.exit(0 if d.get('completed') else 1)"]
+    test: ["CMD", "python3", "-c", "import json,sys,urllib.request as u; d=json.load(u.urlopen('http://localhost:4566/_localstack/init/ready')); ok=d.get('completed') and all(s.get('state')!='ERROR' for s in d.get('scripts',[])); sys.exit(0 if ok else 1)"]
     interval: 10s
     timeout: 5s
     retries: 30
@@ -94,6 +94,7 @@ services:
       - pg_registro_password
       - pg_consulta_password
       - pg_worker_password
+      - kms_key_material
     volumes:
       - ./localstack/init-kms.sh:/etc/localstack/init/ready.d/10-init-kms.sh:ro
 
@@ -133,6 +134,9 @@ services:
     <<: *app
     container_name: pepicloud-app-pruebas
     profiles: ["pruebas"]     # no arranca con "up"; se ejecuta con "run"
+    volumes:
+      - ./app/comun:/app/comun:ro
+      - ./app/pruebas:/app/pruebas:ro
 
 volumes:
   pg_data:
@@ -155,3 +159,5 @@ secrets:
     file: ./secrets/pg_worker_password.txt
   aws_credentials:
     file: ./secrets/aws_credentials
+  kms_key_material:
+    file: ./secrets/kms_key_material.txt
