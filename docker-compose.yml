@@ -78,7 +78,6 @@ services:
       <<: *localstack-env
       SERVICES: s3
       BUCKET_NAME: pepicloud-docs-backup
-      BUCKET_EXTRA: pepicloud-pg-backups
     ports: ["127.0.0.1:4568:4566"]
     volumes:
       - ./localstack/init-bucket.sh:/etc/localstack/init/ready.d/10-init-bucket.sh:ro
