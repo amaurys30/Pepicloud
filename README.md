@@ -110,8 +110,8 @@ pepicloud-docs-a/1102345678/HISTORIA_CLINICA/2026/11/1e667c0b-1692-44c0-b3e6-ac2
 ```bash
 # 1. Clonar el repositorio dentro de Ubuntu
 mkdir -p ~/proyectos && cd ~/proyectos
-git clone <url-del-repositorio> pepicloud
-cd pepicloud
+git clone https://github.com/amaurys30/Pepicloud
+cd Pepicloud
 
 # 2. Generar las contraseñas, la clave maestra y el token de administrador (carpeta secrets/)
 ./scripts/generar_secretos.sh
@@ -294,7 +294,8 @@ pepicloud/
 
 ## Autores
 
-- _Nombre del integrante_ – _correo_
-- _Nombre del integrante_ – _correo_
+-Sofia Marcela Suancha Contreras
+-Daniel Jimenez Salcedo
+-Amaurys Castro De Arco
 
 Taller Práctico 2 – Sistemas Distribuidos – CECAR, 2026-2.
