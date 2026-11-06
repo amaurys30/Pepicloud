@@ -1,4 +1,4 @@
-# Imagen comun para api-registro, api-consulta y worker-backup.
+# Imagen comun para api-registro, api-consulta, worker-backup y s3-init.
 # No contiene credenciales: todas llegan en tiempo de ejecucion (Docker secrets / Secrets Manager).
 FROM python:3.12-slim
 
@@ -16,9 +16,6 @@ COPY comun/ comun/
 COPY api_registro/ api_registro/
 COPY api_consulta/ api_consulta/
 COPY worker_backup/ worker_backup/
-
-# Boveda del backup (volumen): el usuario app debe poder escribir en ella
-RUN mkdir -p /boveda && chown app:app /boveda
 
 USER app
 CMD ["python", "-m", "comun.diagnostico"]

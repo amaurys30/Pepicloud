@@ -29,11 +29,11 @@ x-app: &app
   environment: &app-env
     AWS_DEFAULT_REGION: us-east-1
     AWS_SHARED_CREDENTIALS_FILE: /run/secrets/aws_credentials
-    S3_A_ENDPOINT: http://localstack-a:4566
+    S3_A_ENDPOINT: http://minio-a:9000
     S3_A_BUCKET: pepicloud-docs-a
-    S3_B_ENDPOINT: http://localstack-b:4566
+    S3_B_ENDPOINT: http://minio-b:9000
     S3_B_BUCKET: pepicloud-docs-b
-    S3_BACKUP_ENDPOINT: http://localstack-backup:4566
+    S3_BACKUP_ENDPOINT: http://minio-backup:9000
     S3_BACKUP_BUCKET: pepicloud-docs-backup
     KMS_ENDPOINT: http://localstack-kms:4566
     KMS_KEY_ALIAS: alias/pepicloud-docs
@@ -41,46 +41,24 @@ x-app: &app
     DB_HOST: postgres
     DB_NAME: pepicloud
 
+# Configuracion comun de las instancias MinIO (almacenamiento de objetos persistente)
+x-minio: &minio
+  image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
+  restart: unless-stopped
+  networks: [pepicloud]
+  command: ["server", "/data"]
+  environment:
+    MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
+    MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
+  secrets: [minio_root_user, minio_root_password]
+  healthcheck:
+    test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+    interval: 10s
+    timeout: 5s
+    retries: 10
+    start_period: 10s
+
 services:
-
-  # ------------------------------------------------------------- copia A
-  localstack-a:
-    <<: *localstack
-    container_name: pepicloud-localstack-a
-    hostname: localstack-a
-    environment:
-      <<: *localstack-env
-      SERVICES: s3
-      BUCKET_NAME: pepicloud-docs-a
-    ports: ["127.0.0.1:4566:4566"]
-    volumes:
-      - ./localstack/init-bucket.sh:/etc/localstack/init/ready.d/10-init-bucket.sh:ro
-
-  # ------------------------------------------------------------- copia B
-  localstack-b:
-    <<: *localstack
-    container_name: pepicloud-localstack-b
-    hostname: localstack-b
-    environment:
-      <<: *localstack-env
-      SERVICES: s3
-      BUCKET_NAME: pepicloud-docs-b
-    ports: ["127.0.0.1:4567:4566"]
-    volumes:
-      - ./localstack/init-bucket.sh:/etc/localstack/init/ready.d/10-init-bucket.sh:ro
-
-  # --------------------------------------- backup documental + backups de BD
-  localstack-backup:
-    <<: *localstack
-    container_name: pepicloud-localstack-backup
-    hostname: localstack-backup
-    environment:
-      <<: *localstack-env
-      SERVICES: s3
-      BUCKET_NAME: pepicloud-docs-backup
-    ports: ["127.0.0.1:4568:4566"]
-    volumes:
-      - ./localstack/init-bucket.sh:/etc/localstack/init/ready.d/10-init-bucket.sh:ro
 
   # -------------------------------------- seguridad: KMS + Secrets Manager
   localstack-kms:
@@ -151,8 +129,9 @@ services:
     depends_on:
       postgres:          {condition: service_healthy}
       localstack-kms:    {condition: service_healthy}
-      localstack-a:      {condition: service_healthy}
-      localstack-b:      {condition: service_healthy}
+      minio-a:           {condition: service_healthy}
+      minio-b:           {condition: service_healthy}
+      s3-init:           {condition: service_completed_successfully}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/salud', timeout=3)"]
       interval: 10s
@@ -188,9 +167,6 @@ services:
     environment:
       <<: *app-env
       WORKER_INTERVALO: "15"
-      BOVEDA_DIR: /boveda
-    volumes:
-      - boveda:/boveda          # backup en disco: sobrevive a reinicios de LocalStack
     depends_on:
       postgres:       {condition: service_healthy}
       localstack-kms: {condition: service_healthy}
@@ -255,11 +231,50 @@ services:
     volumes:
       - pg_restore:/var/lib/postgresql/restore
 
+  # ------------------------------------------- MinIO: copia A (principal)
+  minio-a:
+    <<: *minio
+    container_name: pepicloud-minio-a
+    hostname: minio-a
+    ports: ["127.0.0.1:9101:9000"]
+    volumes: ["minio_a_data:/data"]
+
+  # ------------------------------------------- MinIO: copia B (secundaria)
+  minio-b:
+    <<: *minio
+    container_name: pepicloud-minio-b
+    hostname: minio-b
+    ports: ["127.0.0.1:9102:9000"]
+    volumes: ["minio_b_data:/data"]
+
+  # ------------------------------------------- MinIO: backup documental
+  minio-backup:
+    <<: *minio
+    container_name: pepicloud-minio-backup
+    hostname: minio-backup
+    ports: ["127.0.0.1:9103:9000"]
+    volumes: ["minio_backup_data:/data"]
+
+  # ------------------------------- crea los buckets con Object Lock (un solo uso)
+  s3-init:
+    <<: *app
+    container_name: pepicloud-s3-init
+    restart: "no"
+    command: ["python", "-m", "comun.buckets"]
+    environment:
+      <<: *app-env
+    depends_on:
+      minio-a:      {condition: service_healthy}
+      minio-b:      {condition: service_healthy}
+      minio-backup: {condition: service_healthy}
+
 volumes:
   pg_data:
-  boveda:
   pg_backups:
   pg_restore:
+  minio_a_data:
+  minio_b_data:
+  minio_backup_data:
 
 networks:
   pepicloud:
@@ -283,3 +298,7 @@ secrets:
     file: ./secrets/kms_key_material.txt
   api_admin_token:
     file: ./secrets/api_admin_token.txt
+  minio_root_user:
+    file: ./secrets/minio_root_user.txt
+  minio_root_password:
+    file: ./secrets/minio_root_password.txt

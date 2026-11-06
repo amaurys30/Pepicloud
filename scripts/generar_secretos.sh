@@ -48,3 +48,21 @@ if [[ ! -f secrets/api_admin_token.txt ]]; then
   echo "Creado:    secrets/api_admin_token.txt"
 fi
 chmod 644 secrets/api_admin_token.txt
+
+# Credenciales de MinIO (copias A, B y backup). Las aplicaciones usan las mismas
+# a traves de secrets/aws_credentials (LocalStack-KMS acepta cualquier credencial).
+if [[ ! -f secrets/minio_root_user.txt ]]; then
+  printf 'pepicloud' > secrets/minio_root_user.txt
+  echo "Creado:    secrets/minio_root_user.txt"
+fi
+if [[ ! -f secrets/minio_root_password.txt ]]; then
+  generar > secrets/minio_root_password.txt
+  echo "Creado:    secrets/minio_root_password.txt"
+fi
+minio_usuario=$(cat secrets/minio_root_user.txt)
+minio_clave=$(cat secrets/minio_root_password.txt)
+if ! grep -qF "$minio_clave" secrets/aws_credentials 2>/dev/null; then
+  printf '[default]\naws_access_key_id = %s\naws_secret_access_key = %s\n' "$minio_usuario" "$minio_clave" > secrets/aws_credentials
+  echo "Actualizado: secrets/aws_credentials (credenciales de MinIO)"
+fi
+chmod 644 secrets/minio_root_user.txt secrets/minio_root_password.txt secrets/aws_credentials

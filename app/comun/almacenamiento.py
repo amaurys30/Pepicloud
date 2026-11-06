@@ -116,3 +116,13 @@ def leer_con_failover(llave: str, validar=None, orden=("A", "B", "BACKUP")) -> L
         except Exception as e:
             intentos.append((rol, describir(e), round(time.monotonic() - inicio, 2)))
     raise DocumentoNoDisponible(llave, intentos)
+
+
+def es_bloqueo(error: Exception) -> bool:
+    """True si S3 rechazo la operacion por Object Lock.
+    LocalStack responde AccessDenied; MinIO responde InvalidRequest 'Object is WORM protected'."""
+    if not isinstance(error, ClientError):
+        return False
+    err = error.response.get("Error", {})
+    mensaje = str(err.get("Message", "")).lower()
+    return err.get("Code") == "AccessDenied" or "worm" in mensaje or "object lock" in mensaje

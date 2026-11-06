@@ -204,9 +204,11 @@ def eliminar_documento(id_documento: uuid.UUID, authorization: str | None = Head
             resultados[c["rol"]] = "ELIMINADA"
         except ClientError as e:
             codigo = alm.describir(e)
-            resultados[c["rol"]] = {"AccessDenied": "PROTEGIDA_OBJECT_LOCK",
-                                    "NoSuchKey": "NO_EXISTIA",
-                                    "NoSuchVersion": "NO_EXISTIA"}.get(codigo, codigo)
+            if alm.es_bloqueo(e):
+                resultados[c["rol"]] = "PROTEGIDA_OBJECT_LOCK"
+            else:
+                resultados[c["rol"]] = {"NoSuchKey": "NO_EXISTIA",
+                                        "NoSuchVersion": "NO_EXISTIA"}.get(codigo, codigo)
         except Exception as e:
             resultados[c["rol"]] = alm.describir(e)
 
