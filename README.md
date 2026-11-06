@@ -2,7 +2,7 @@
 
 Prototipo de un sistema distribuido para almacenar documentos clínicos de pacientes con **alta disponibilidad, cifrado e inmutabilidad**. Desarrollado para el **Taller Práctico 2 de Sistemas Distribuidos** (CECAR, 2026-2).
 
-El sistema permite registrar pacientes, cargar sus documentos (historias clínicas, laboratorios, imágenes diagnósticas, etc.) y consultarlos desde dos portales web separados. Cada documento se cifra antes de guardarse, se almacena en **dos copias activas y un backup independiente** sobre almacenamiento de objetos (S3 en LocalStack), y queda **protegido contra modificación o borrado durante 30 minutos**, incluso para un administrador.
+El sistema permite registrar pacientes, cargar sus documentos (historias clínicas, laboratorios, imágenes diagnósticas, etc.) y consultarlos desde dos portales web separados. Cada documento se cifra antes de guardarse, se almacena en **dos copias activas y un backup independiente** sobre almacenamiento de objetos persistente (**MinIO**, compatible con S3), y queda **protegido contra modificación o borrado durante 30 minutos**, incluso para un administrador. **LocalStack** provee el servicio de claves (KMS) y la gestión de secretos (Secrets Manager).
 
 ---
 
@@ -31,14 +31,15 @@ flowchart LR
     UR --> AR[api-registro]
     UC --> AC[api-consulta]
 
-    AR -- "escribe en paralelo" --> A[("localstack-a<br/>copia A")]
-    AR -- "escribe en paralelo" --> B[("localstack-b<br/>copia B")]
+    AR -- "escribe en paralelo" --> A[("minio-a<br/>copia A")]
+    AR -- "escribe en paralelo" --> B[("minio-b<br/>copia B")]
     AC -. "lee con failover A → B → backup" .-> A
     AC -.-> B
-    AC -.-> BK[("localstack-backup<br/>backup")]
+    AC -.-> BK[("minio-backup<br/>backup")]
 
     W[worker-backup] -- "backup y reparación" --> BK
-    W --> V[("bóveda<br/>volumen en disco")]
+    W -. "repara" .-> A
+    W -. "repara" .-> B
 
     AR --> PG[("PostgreSQL 17<br/>metadatos")]
     AC --> PG
@@ -55,10 +56,11 @@ flowchart LR
 | `ui-consulta` | 8082 | Portal web de consulta y descarga (solo lectura) |
 | `api-registro` | interno | Cifra los documentos, los guarda en A y B y registra los metadatos; elimina con permisos |
 | `api-consulta` | interno | Busca y descarga documentos con failover A → B → backup y *circuit breaker* |
-| `worker-backup` | — | Cada 15 s: copia al backup y a la bóveda, verifica las copias y repara las perdidas |
-| `localstack-a` | 4566 | Copia operativa A – bucket `pepicloud-docs-a` |
-| `localstack-b` | 4567 | Copia operativa B – bucket `pepicloud-docs-b` |
-| `localstack-backup` | 4568 | Backup documental – bucket `pepicloud-docs-backup` |
+| `worker-backup` | — | Cada 15 s: copia al backup, verifica las tres copias y repara las perdidas |
+| `minio-a` | 9101 | Copia operativa A – bucket `pepicloud-docs-a` (volumen `minio_a_data`) |
+| `minio-b` | 9102 | Copia operativa B – bucket `pepicloud-docs-b` (volumen `minio_b_data`) |
+| `minio-backup` | 9103 | Backup documental – bucket `pepicloud-docs-backup` (volumen `minio_backup_data`) |
+| `s3-init` | — | Crea los buckets con Object Lock al arrancar y termina |
 | `localstack-kms` | 4569 | Clave maestra de cifrado (KMS) y credenciales de BD (Secrets Manager) |
 | `postgres` | 5432 | PostgreSQL 17: personas, metadatos, copias y auditoría (sin archivos) |
 | `pg-backup` | — | Backup completo inicial e incrementales cada 10 minutos |
@@ -84,12 +86,12 @@ pepicloud-docs-a/1102345678/HISTORIA_CLINICA/2026/11/1e667c0b-1692-44c0-b3e6-ac2
 | --- | --- | --- |
 | 1 | Documentos asociados a personas, con interfaces de registro y consulta separadas | Dos portales Nginx independientes, cada uno con su propia API y su propio usuario de base de datos |
 | 2 | PostgreSQL para metadatos, sin BLOB | Tablas `personas`, `tipos_documento`, `documentos`, `copias_documento` y `auditoria`; los archivos solo se referencian por su ruta |
-| 3 | Dos copias activo-activo y un backup independiente | Escritura en paralelo en dos instancias LocalStack separadas; backup asíncrono en una tercera instancia, más una copia en disco (bóveda) |
+| 3 | Dos copias activo-activo y un backup independiente | Escritura en paralelo en dos instancias MinIO separadas, cada una con su disco; backup asíncrono en una tercera instancia |
 | 4 | Recuperación ante pérdida o indisponibilidad de una copia | Lectura con failover y verificación de integridad; el worker reconstruye automáticamente las copias perdidas sin volver a cargar el archivo |
 | 5 | Backup de la base: completo, incrementales, almacenamiento separado y prueba de restauración | `pg_basebackup` (full e incremental nativo de PostgreSQL 17) en un volumen propio; restauración con `pg_combinebackup` en una instancia aparte |
 | 6 | Cifrado en reposo y credenciales fuera del código | Cifrado de sobre con KMS + AES-256-GCM; Docker secrets y Secrets Manager; nada sensible en Git ni en las imágenes |
 | 7 | Inmutabilidad de 30 minutos, incluso para administradores | S3 Object Lock en modo COMPLIANCE, escritura condicional sin sobrescritura y trigger en PostgreSQL; eliminación posterior con token de administrador |
-| 8 | Docker, PostgreSQL y LocalStack | Todo el sistema se levanta con `docker compose` |
+| 8 | Docker, PostgreSQL y LocalStack | Todo el sistema se levanta con `docker compose`; LocalStack provee KMS y Secrets Manager |
 
 ---
 
@@ -98,7 +100,7 @@ pepicloud-docs-a/1102345678/HISTORIA_CLINICA/2026/11/1e667c0b-1692-44c0-b3e6-ac2
 - **Windows 11 con WSL2 (Ubuntu)**, o Linux/macOS.
 - **Docker Desktop** con la integración de WSL activada para Ubuntu (*Settings → Resources → WSL integration*), o Docker Engine con Compose v2.
 - **Git**.
-- **Al menos 8 GB de RAM disponibles para Docker** (son 11 contenedores, 4 de ellos LocalStack).
+- **Al menos 6 GB de RAM disponibles para Docker.**
 - **Token de LocalStack.** Desde marzo de 2026 la imagen exige autenticación. Cada integrante crea una cuenta gratuita (plan *Hobby*) en <https://app.localstack.cloud> y copia su token desde *Auth Tokens*.
 
 > En Windows, trabajen **dentro del sistema de archivos de Ubuntu** (por ejemplo `~/proyectos`), no en `/mnt/c/...`: en el disco de Windows los permisos de ejecución no funcionan y Docker es mucho más lento.
@@ -113,7 +115,7 @@ mkdir -p ~/proyectos && cd ~/proyectos
 git clone https://github.com/amaurys30/Pepicloud.git
 cd Pepicloud
 
-# 2. Generar las contraseñas, la clave maestra y el token de administrador (carpeta secrets/)
+# 2. Generar las contraseñas, la clave maestra, las credenciales de MinIO y el token de administrador
 ./scripts/generar_secretos.sh
 
 # 3. Crear el archivo de configuración y poner el token de LocalStack
@@ -128,13 +130,14 @@ sleep 90
 docker compose ps
 ```
 
-Todos los servicios deben aparecer `Up` y, los que tienen verificación de salud, `(healthy)`. `postgres-restore` no aparece porque solo se enciende para probar restauraciones.
+Todos los servicios deben aparecer `Up` y, los que tienen verificación de salud, `(healthy)`. `s3-init` aparece como terminado (`Exited (0)`) porque solo crea los buckets al arrancar, y `postgres-restore` no aparece porque solo se enciende para probar restauraciones.
 
 Verificación rápida:
 
 ```bash
 curl -s localhost:8081/api/salud; echo     # {"estado":"ok","servicio":"api-registro","retencion_minutos":30}
 curl -s localhost:8082/api/salud; echo     # {"estado":"ok","servicio":"api-consulta","copias_marcadas_caidas":[]}
+docker compose run --rm app-pruebas        # conectividad con las 3 copias, KMS y Secrets Manager
 ```
 
 ---
@@ -160,7 +163,7 @@ Se pega en el campo *Token de administrador* del portal de registro. Durante los
 
 ```bash
 docker compose up -d                  # encender todo
-docker compose stop                   # apagar todo (conserva base, bóveda y backups)
+docker compose stop                   # apagar todo (los datos se conservan)
 docker compose ps                     # estado
 docker compose stop <servicio>        # detener un servicio (por ejemplo, para simular una caída)
 docker compose start <servicio>       # volver a levantarlo
@@ -168,9 +171,9 @@ docker compose logs --tail 30 <servicio>
 docker compose logs -f worker-backup  # ver al worker trabajando (Ctrl+C para salir)
 ```
 
-> ⚠️ **Nunca ejecuten `docker compose down -v`.** La opción `-v` borra los volúmenes: la base de datos, la bóveda y los backups.
+> ⚠️ **Nunca ejecuten `docker compose down -v`.** La opción `-v` borra los volúmenes: la base de datos, las tres copias de los documentos y los backups.
 
-Al encender, las copias A, B y backup vuelven vacías (LocalStack gratuito no persiste datos) y el worker las reconstruye automáticamente desde la bóveda en el primer minuto.
+Las tres copias guardan sus datos en disco: apagar o reiniciar una instancia MinIO no borra nada. Si una copia pierde datos (por ejemplo, porque se vacía su volumen), el worker la reconstruye desde otra copia sana en su siguiente ciclo.
 
 ---
 
@@ -187,6 +190,16 @@ Al encender, las copias A, B y backup vuelven vacías (LocalStack gratuito no pe
 | Conexión a BD | `docker compose run --rm app-pruebas python -m pruebas.prueba_bd_conexion` | Credenciales desde Secrets Manager y mínimo privilegio |
 
 > Ejecuten las pruebas que suben objetos siempre con `-e RETENCION_MINUTOS=2`; si no, esos objetos quedan bloqueados 30 minutos.
+
+**Simular la pérdida de datos de una copia** (por ejemplo, la B):
+
+```bash
+docker compose stop minio-b
+docker run --rm -v pepicloud_minio_b_data:/d alpine sh -c 'rm -rf /d/* /d/.[!.]*'
+docker compose start minio-b
+sleep 40
+docker compose logs --since 45s worker-backup     # PERDIDA, bucket recreado y REPARACION de cada documento
+```
 
 ---
 
@@ -223,13 +236,14 @@ Para restaurar a un momento anterior, se pasa el nombre del último backup a inc
 | Contraseñas de cada servicio | `pg_registro_password.txt`, `pg_consulta_password.txt`, `pg_worker_password.txt` | Se cargan en Secrets Manager; las APIs las leen de ahí |
 | Material de la clave maestra KMS | `kms_key_material.txt` | `localstack-kms` |
 | Token de administrador | `api_admin_token.txt` | `api-registro` |
-| Credenciales AWS de LocalStack | `aws_credentials` | APIs y worker |
-| Token de LocalStack | `.env` | Instancias LocalStack |
+| Usuario y contraseña de MinIO | `minio_root_user.txt`, `minio_root_password.txt` | Las tres instancias MinIO |
+| Credenciales S3 de las aplicaciones | `aws_credentials` (las mismas de MinIO) | APIs, worker y `s3-init` |
+| Token de LocalStack | `.env` | `localstack-kms` |
 
 - Los secretos llegan a los contenedores como **Docker secrets** (archivos en `/run/secrets/`), no como variables de entorno.
 - `.env` y `secrets/` están en `.gitignore`; solo se versiona `.env.example`.
 - Cada servicio usa un **usuario de base de datos propio con permisos mínimos**: el de consulta solo lee y el worker no puede ver datos de pacientes.
-- Los documentos se cifran con una **clave distinta por documento** (AES-256-GCM), que a su vez se cifra con la clave maestra de KMS.
+- Los documentos se cifran con una **clave distinta por documento** (AES-256-GCM), que a su vez se cifra con la clave maestra de KMS. MinIO solo guarda bytes cifrados.
 
 > ⚠️ **`secrets/kms_key_material.txt` es la llave de todos los documentos.** Guarden una copia fuera del repositorio. Si se pierde, los documentos cifrados no se pueden recuperar.
 
@@ -238,24 +252,23 @@ Para restaurar a un momento anterior, se pasa el nombre del último backup a inc
 ## Estructura del proyecto
 
 ```
-pepicloud/
+Pepicloud/
 ├── docker-compose.yml
 ├── .env.example                     # plantilla de configuración (el .env real no se versiona)
 ├── scripts/
 │   └── generar_secretos.sh          # genera todos los secretos en secrets/
 ├── secrets/                         # contraseñas y claves (no se versiona)
 ├── localstack/
-│   ├── init-bucket.sh               # crea el bucket de cada instancia con Object Lock
 │   └── init-kms.sh                  # clave maestra fija + secretos en Secrets Manager
 ├── db/init/                         # se ejecuta al crear la base por primera vez
 │   ├── 00_roles.sh                  # usuarios por servicio
 │   ├── 01_esquema.sql               # tablas, índices y triggers de inmutabilidad
 │   ├── 02_permisos.sql              # mínimo privilegio
 │   └── 03_datos_iniciales.sql       # tipos de documento
-├── app/                             # imagen Python común (APIs y worker)
+├── app/                             # imagen Python común (APIs, worker y s3-init)
 │   ├── Dockerfile
 │   ├── requirements.txt
-│   ├── comun/                       # configuración, AWS, cifrado, almacenamiento, BD, circuit breaker
+│   ├── comun/                       # configuración, S3, buckets, cifrado, almacenamiento, BD, circuit breaker
 │   ├── api_registro/main.py
 │   ├── api_consulta/main.py
 │   ├── worker_backup/main.py
@@ -279,13 +292,14 @@ pepicloud/
 
 ## Decisiones de diseño y limitaciones
 
+- **MinIO para las copias y LocalStack para KMS y Secrets Manager.** El plan gratuito de LocalStack no guarda los datos al reiniciarse, lo que ponía en riesgo las copias y el backup. Con la aprobación del profesor, las tres copias se movieron a MinIO, que es compatible con S3, guarda en disco y soporta Object Lock en modo COMPLIANCE. Se usa la imagen `pgsty/silo`, un fork comunitario de MinIO, porque las imágenes oficiales de MinIO se retiraron de Docker Hub en 2026.
 - **Backup asíncrono.** La API escribe A y B en paralelo; el backup lo hace el worker segundos después. Así, una caída de la instancia de backup no impide cargar documentos.
-- **Bóveda en disco.** El plan gratuito de LocalStack no guarda datos al reiniciarse. Para que el backup sobreviva a reinicios, el worker guarda además una copia cifrada en un volumen de Docker. En AWS real no sería necesario, porque S3 guarda en disco.
-- **Reparación automática.** El worker distingue una copia *inalcanzable* (instancia caída: espera) de una copia *perdida* (la instancia responde que no existe: la reconstruye). Nunca descifra: copia los bytes cifrados y verifica su huella.
+- **Reparación automática.** El worker distingue una copia *inalcanzable* (instancia caída: espera) de una copia *perdida* (la instancia responde que no existe: la reconstruye). Si el bucket completo desapareció, lo vuelve a crear con Object Lock. Nunca descifra: copia los bytes cifrados y verifica su huella (MD5). Las copias reparadas conservan la retención restante del documento.
 - **Clave maestra reproducible.** LocalStack recrea KMS al reiniciarse; la clave se crea siempre con el mismo ID y material, guardado como secreto, para que los documentos sigan siendo legibles.
 - **Failover rápido.** Se redujo el tiempo de resolución DNS a 1 s y la API de consulta recuerda durante 15 s qué copia está caída (*circuit breaker*): la primera descarga con una copia caída tarda ~3 s y las siguientes ~0,02 s.
 - **Limitaciones conocidas:**
   - Todas las instancias corren en la misma máquina, que es un punto de falla común; en producción cada copia iría en un nodo o zona distinta.
+  - Las tres instancias MinIO comparten las mismas credenciales, y las aplicaciones usan esas credenciales de administrador; en producción cada servicio tendría un usuario de MinIO con permisos mínimos.
   - El token de administrador es uno solo y compartido; en producción se usaría autenticación con usuarios y roles (OAuth/OpenID Connect).
   - La comunicación es HTTP porque todo es local; en producción sería HTTPS.
   - El token de LocalStack se pasa como variable de entorno, único mecanismo que LocalStack acepta.
@@ -294,8 +308,8 @@ pepicloud/
 
 ## Autores
 
--Sofia Marcela Suancha Contreras
--Daniel Jimenez Salcedo
--Amaurys Castro De Arco
+- Sofia Marcela Suancha Contreras
+- Daniel Jimenez Salcedo
+- Amaurys Castro De Arco
 
 Taller Práctico 2 – Sistemas Distribuidos – CECAR, 2026-2.
